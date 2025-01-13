@@ -8,6 +8,43 @@
 #include <windows.h>
 #include <commdlg.h>
 #endif
+
+// Абстрактный базовый класс для фильтров
+class Filter {
+public:
+    virtual void apply(cv::Mat& image) = 0;
+    virtual ~Filter() {}
+};
+
+// Фильтр для преобразования в оттенки серого
+class GrayscaleFilter : public Filter {
+public:
+    void apply(cv::Mat& image) override {
+        cv::cvtColor(image, image, cv::COLOR_BGR2GRAY);
+        cv::cvtColor(image, image, cv::COLOR_GRAY2BGR); // Обратно в BGR для консистентности
+    }
+};
+
+// Фильтр размытия
+class BlurFilter : public Filter {
+public:
+    void apply(cv::Mat& image) override {
+        cv::GaussianBlur(image, image, cv::Size(15, 15), 0);
+    }
+};
+
+// Фильтр увеличения резкости
+class SharpenFilter : public Filter {
+public:
+    void apply(cv::Mat& image) override {
+        cv::Mat kernel = (cv::Mat_<float>(3, 3) <<
+            0, -1, 0,
+            -1, 5, -1,
+            0, -1, 0);
+        cv::filter2D(image, image, -1, kernel);
+    }
+};
+
 class ImageApp {
 private:
     cv::Mat image;
@@ -15,21 +52,21 @@ private:
     // Открыть файл через диалоговое окно
     std::string openFileDialog() {
 #ifdef _WIN32
-        wchar_t filename[MAX_PATH] = L""; // Используем wchar_t для поддержки Unicode
-        OPENFILENAMEW ofn;                // Используем версию Unicode API
+        wchar_t filename[MAX_PATH] = L"";
+        OPENFILENAMEW ofn;
         ZeroMemory(&ofn, sizeof(ofn));
         ofn.lStructSize = sizeof(ofn);
         ofn.hwndOwner = NULL;
-        ofn.lpstrFilter = L"Image Files\0*.jpg;*.png;*.bmp;*.jpeg\0All Files\0*.*\0";
+        ofn.lpstrFilter = L"Файлы изображений\0*.jpg;*.png;*.bmp;*.jpeg\0Все файлы\0*.*\0";
         ofn.lpstrFile = filename;
         ofn.nMaxFile = MAX_PATH;
         ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
         ofn.lpstrDefExt = L"jpg";
 
         if (GetOpenFileNameW(&ofn)) {
-            // Преобразуем широкую строку в std::string
-            std::wstring ws(filename);
-            return std::string(ws.begin(), ws.end());
+            char result[MAX_PATH];
+            WideCharToMultiByte(CP_UTF8, 0, filename, -1, result, MAX_PATH, NULL, NULL);
+            return std::string(result);
         }
 #endif
         return "";
@@ -38,30 +75,59 @@ private:
     // Сохранить файл через диалоговое окно
     std::string saveFileDialog() {
 #ifdef _WIN32
-        wchar_t filename[MAX_PATH] = L""; // Используем wchar_t для поддержки Unicode
-        OPENFILENAMEW ofn;                // Используем версию Unicode API
+        wchar_t filename[MAX_PATH] = L"";
+        OPENFILENAMEW ofn;
         ZeroMemory(&ofn, sizeof(ofn));
         ofn.lStructSize = sizeof(ofn);
         ofn.hwndOwner = NULL;
-        ofn.lpstrFilter = L"Image Files\0*.jpg;*.png;*.bmp;*.jpeg\0All Files\0*.*\0";
+        ofn.lpstrFilter = L"Файлы изображений\0*.jpg;*.png;*.bmp;*.jpeg\0Все файлы\0*.*\0";
         ofn.lpstrFile = filename;
         ofn.nMaxFile = MAX_PATH;
         ofn.Flags = OFN_OVERWRITEPROMPT;
         ofn.lpstrDefExt = L"jpg";
 
         if (GetSaveFileNameW(&ofn)) {
-            // Преобразуем широкую строку в std::string
-            std::wstring ws(filename);
-            return std::string(ws.begin(), ws.end());
+            char result[MAX_PATH];
+            WideCharToMultiByte(CP_UTF8, 0, filename, -1, result, MAX_PATH, NULL, NULL);
+            return std::string(result);
         }
 #endif
         return "";
     }
 
+    // Применить выбранный фильтр
+    void applyFilter(int filterChoice) {
+        if (image.empty()) {
+            std::cerr << "Ошибка: изображение не загружено, фильтр не может быть применён!" << std::endl;
+            return;
+        }
+
+        std::unique_ptr<Filter> filter;
+        switch (filterChoice) {
+        case 1:
+            filter = std::make_unique<GrayscaleFilter>();
+            break;
+        case 2:
+            filter = std::make_unique<BlurFilter>();
+            break;
+        case 3:
+            filter = std::make_unique<SharpenFilter>();
+            break;
+        default:
+            std::cerr << "Ошибка: неправильный выбор фильтра!" << std::endl;
+            return;
+        }
+
+        filter->apply(image);
+        cv::imshow("Изображение с фильтром", image);
+        cv::waitKey(0);
+        cv::destroyAllWindows();
+    }
+
 public:
     void run() {
         while (true) {
-            std::cout << "Меню:\n1. Открыть изображение\n2. Сохранить изображение\n3. Выйти\nВведите ваш выбор: ";
+            std::cout << "Меню:\n1. Открыть изображение\n2. Сохранить изображение\n3. Применить фильтр оттенков серого\n4. Применить фильтр размытия\n5. Применить фильтр резкости\n6. Выйти\nВведите ваш выбор: ";
             int choice;
             std::cin >> choice;
 
@@ -86,7 +152,7 @@ public:
             }
             case 2: {
                 if (image.empty()) {
-                    std::cerr << "Ошибка: нет изображения для сохранения!" << std::endl;
+                    std::cerr << "Ошибка: нечего сохранять!" << std::endl;
                 }
                 else {
                     std::string filename = saveFileDialog();
@@ -99,26 +165,28 @@ public:
                         }
                     }
                     else {
-                        std::cerr << "Ошибка: файл не выбран для сохранения!" << std::endl;
+                        std::cerr << "Ошибка: имя файла для сохранения не выбрано!" << std::endl;
                     }
                 }
                 break;
             }
             case 3:
+                applyFilter(1);
+                break;
+            case 4:
+                applyFilter(2);
+                break;
+            case 5:
+                applyFilter(3);
+                break;
+            case 6:
                 std::cout << "Выход из программы." << std::endl;
                 return;
             default:
-                std::cerr << "Ошибка: неверный выбор!" << std::endl;
+                std::cerr << "Ошибка: неправильный выбор!" << std::endl;
             }
         }
     }
-};
-
-// Абстрактный базовый класс для фильтров
-class Filter {
-public:
-    virtual void apply(cv::Mat& image) = 0;
-    virtual ~Filter() {}
 };
 
 int main() {
