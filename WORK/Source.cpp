@@ -2,13 +2,12 @@
 #include <opencv2/highgui.hpp>
 #include <iostream>
 #include <string>
-#include <vector>
+#include <memory>
 
 #ifdef _WIN32
 #include <windows.h>
 #include <commdlg.h>
 #endif
-
 class ImageApp {
 private:
     cv::Mat image;
@@ -113,6 +112,13 @@ public:
             }
         }
     }
+};
+
+// Абстрактный базовый класс для фильтров
+class Filter {
+public:
+    virtual void apply(cv::Mat& image) = 0;
+    virtual ~Filter() {}
 };
 
 int main() {
