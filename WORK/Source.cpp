@@ -1,15 +1,12 @@
+#include <opencv2/opencv.hpp>
 #include <FL/Fl.H>
 #include <FL/Fl_Window.H>
-#include <FL/Fl_Box.H>
 #include <FL/Fl_Button.H>
-#include <opencv2/opencv.hpp>
 #include <windows.h>
 #include <commdlg.h>
 #include <memory>
 #include <string>
-#include <opencv2/core.hpp>
-#include <opencv2/core/utils/logger.hpp>
-
+#include <iostream>
 
 // Абстрактный базовый класс для фильтров
 class Filter {
@@ -50,22 +47,12 @@ public:
 class ImageEditor {
 private:
     cv::Mat image;
-    Fl_Box* imageBox;
 
     void updateImageDisplay() {
         if (!image.empty() && image.channels() == 3) {
-            cv::Mat temp;
-            cv::cvtColor(image, temp, cv::COLOR_BGR2RGB);
-
-            Fl_Image* oldImage = imageBox->image();  // Сохраняем старое изображение
-            auto* flImage = new Fl_RGB_Image(temp.data, temp.cols, temp.rows, 3);
-            imageBox->image(flImage);
-
-            if (oldImage) {
-                delete oldImage;  // Удаляем старое изображение
-            }
-
-            imageBox->redraw();
+            // Отображаем изображение через OpenCV
+            cv::imshow("Image", image);
+            cv::waitKey(1);  // Обновляем окно
         }
         else {
             MessageBox(NULL, L"Invalid image format", L"Error", MB_OK | MB_ICONERROR);
@@ -73,8 +60,6 @@ private:
     }
 
 public:
-    ImageEditor(Fl_Box* box) : imageBox(box) {}
-
     void openImage(const std::wstring& path) {
         image = cv::imread(cv::String(path.begin(), path.end()), cv::IMREAD_COLOR);
         if (image.empty()) {
@@ -142,6 +127,7 @@ std::wstring saveFileDialog(const wchar_t* filter) {
     return L"";
 }
 
+// Колбэки для FLTK кнопок
 void openImageCallback(Fl_Widget*, void* data) {
     ImageEditor* editor = static_cast<ImageEditor*>(data);
     std::wstring path = openFileDialog(L"Images (*.jpg;*.png)\0*.jpg;*.png\0");
@@ -174,31 +160,31 @@ void applySharpenCallback(Fl_Widget*, void* data) {
 }
 
 int main() {
-    cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_SILENT);
-    Fl_Window* window = new Fl_Window(800, 600, "Image Editor");
+    // Окно для панели с кнопками
+    Fl_Window* buttonWindow = new Fl_Window(800, 150, "Button Panel");
 
-    Fl_Box* imageBox = new Fl_Box(10, 10, 780, 480);
-    imageBox->box(FL_BORDER_BOX);
+    ImageEditor editor; // Создаем объект для работы с изображениями
 
-    ImageEditor editor(imageBox);
-
-    Fl_Button* openButton = new Fl_Button(10, 500, 120, 30, "Open");
+    Fl_Button* openButton = new Fl_Button(10, 10, 120, 30, "Open");
     openButton->callback(openImageCallback, &editor);
 
-    Fl_Button* saveButton = new Fl_Button(140, 500, 120, 30, "Save");
+    Fl_Button* saveButton = new Fl_Button(140, 10, 120, 30, "Save");
     saveButton->callback(saveImageCallback, &editor);
 
-    Fl_Button* grayscaleButton = new Fl_Button(270, 500, 120, 30, "Grayscale");
+    Fl_Button* grayscaleButton = new Fl_Button(270, 10, 120, 30, "Grayscale");
     grayscaleButton->callback(applyGrayscaleCallback, &editor);
 
-    Fl_Button* blurButton = new Fl_Button(400, 500, 120, 30, "Blur");
+    Fl_Button* blurButton = new Fl_Button(400, 10, 120, 30, "Blur");
     blurButton->callback(applyBlurCallback, &editor);
 
-    Fl_Button* sharpenButton = new Fl_Button(530, 500, 120, 30, "Sharpen");
+    Fl_Button* sharpenButton = new Fl_Button(530, 10, 120, 30, "Sharpen");
     sharpenButton->callback(applySharpenCallback, &editor);
 
-    window->end();
-    window->show();
+    buttonWindow->end();
+    buttonWindow->show();
 
-    return Fl::run();
+    // В этом примере отображение изображения будет происходить только через OpenCV.
+    // Окно изображения будет открываться при вызове `cv::imshow()` в `updateImageDisplay`.
+
+    return Fl::run(); // Запуск FLTK
 }
