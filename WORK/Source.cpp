@@ -1,11 +1,15 @@
 #include <FL/Fl.H>
 #include <FL/Fl_Window.H>
-#include <FL/Fl_Button.H>
 #include <FL/Fl_Box.H>
-#include <FL/Fl_JPEG_Image.H>
-#include <FL/Fl_File_Chooser.H>
+#include <FL/Fl_Button.H>
 #include <opencv2/opencv.hpp>
+#include <windows.h>
+#include <commdlg.h>
 #include <memory>
+#include <string>
+#include <opencv2/core.hpp>
+#include <opencv2/core/utils/logger.hpp>
+
 
 // Абстрактный базовый класс для фильтров
 class Filter {
@@ -48,88 +52,129 @@ private:
     cv::Mat image;
     Fl_Box* imageBox;
 
-    // Обновить отображение изображения
     void updateImageDisplay() {
-        if (!image.empty()) {
+        if (!image.empty() && image.channels() == 3) {
             cv::Mat temp;
             cv::cvtColor(image, temp, cv::COLOR_BGR2RGB);
 
-            Fl_RGB_Image* flImage = new Fl_RGB_Image(temp.data, temp.cols, temp.rows, 3);
+            Fl_Image* oldImage = imageBox->image();  // Сохраняем старое изображение
+            auto* flImage = new Fl_RGB_Image(temp.data, temp.cols, temp.rows, 3);
             imageBox->image(flImage);
+
+            if (oldImage) {
+                delete oldImage;  // Удаляем старое изображение
+            }
+
             imageBox->redraw();
+        }
+        else {
+            MessageBox(NULL, L"Invalid image format", L"Error", MB_OK | MB_ICONERROR);
         }
     }
 
 public:
     ImageEditor(Fl_Box* box) : imageBox(box) {}
 
-    // Открыть изображение из файла
-    void openImage(const char* path) {
-        image = cv::imread(path);
+    void openImage(const std::wstring& path) {
+        image = cv::imread(cv::String(path.begin(), path.end()), cv::IMREAD_COLOR);
         if (image.empty()) {
-            fl_message("Failed to load image");
+            MessageBox(NULL, L"Failed to load image", L"Error", MB_OK | MB_ICONERROR);
         }
         else {
             updateImageDisplay();
         }
     }
 
-    // Сохранить изображение в файл
-    void saveImage(const char* path) {
+    void saveImage(const std::wstring& path) {
         if (!image.empty()) {
-            cv::imwrite(path, image);
+            cv::imwrite(cv::String(path.begin(), path.end()), image);
         }
         else {
-            fl_message("No image to save");
+            MessageBox(NULL, L"No image to save", L"Error", MB_OK | MB_ICONERROR);
         }
     }
 
-    // Применить фильтр
     void applyFilter(std::unique_ptr<Filter> filter) {
         if (!image.empty() && filter) {
-            filter->apply(image);
-            updateImageDisplay();
+            try {
+                filter->apply(image);
+                updateImageDisplay();
+            }
+            catch (const std::exception& e) {
+                MessageBox(NULL, std::wstring(L"Filter error: " + std::wstring(e.what(), e.what() + strlen(e.what()))).c_str(), L"Error", MB_OK | MB_ICONERROR);
+            }
+        }
+        else {
+            MessageBox(NULL, L"No image to apply filter", L"Error", MB_OK | MB_ICONERROR);
         }
     }
 };
 
-// Обработчик для кнопки открытия изображения
+std::wstring openFileDialog(const wchar_t* filter) {
+    wchar_t fileName[MAX_PATH] = { 0 };
+    OPENFILENAME ofn = { 0 };
+    ofn.lStructSize = sizeof(OPENFILENAME);
+    ofn.hwndOwner = NULL;
+    ofn.lpstrFilter = filter;
+    ofn.lpstrFile = fileName;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
+
+    if (GetOpenFileName(&ofn)) {
+        return fileName;
+    }
+    return L"";
+}
+
+std::wstring saveFileDialog(const wchar_t* filter) {
+    wchar_t fileName[MAX_PATH] = L"output.jpg";
+    OPENFILENAME ofn = { 0 };
+    ofn.lStructSize = sizeof(OPENFILENAME);
+    ofn.hwndOwner = NULL;
+    ofn.lpstrFilter = filter;
+    ofn.lpstrFile = fileName;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_OVERWRITEPROMPT;
+
+    if (GetSaveFileName(&ofn)) {
+        return fileName;
+    }
+    return L"";
+}
+
 void openImageCallback(Fl_Widget*, void* data) {
     ImageEditor* editor = static_cast<ImageEditor*>(data);
-    const char* path = fl_file_chooser("Open Image", "Images (*.jpg;*.png)", "");
-    if (path) {
+    std::wstring path = openFileDialog(L"Images (*.jpg;*.png)\0*.jpg;*.png\0");
+    if (!path.empty()) {
         editor->openImage(path);
     }
 }
 
-// Обработчик для кнопки сохранения изображения
 void saveImageCallback(Fl_Widget*, void* data) {
     ImageEditor* editor = static_cast<ImageEditor*>(data);
-    const char* path = fl_file_chooser("Save Image", "*.jpg", "output.jpg");
-    if (path) {
+    std::wstring path = saveFileDialog(L"JPEG Files (*.jpg)\0*.jpg\0PNG Files (*.png)\0*.png\0");
+    if (!path.empty()) {
         editor->saveImage(path);
     }
 }
 
-// Обработчик для применения фильтра "оттенки серого"
 void applyGrayscaleCallback(Fl_Widget*, void* data) {
     ImageEditor* editor = static_cast<ImageEditor*>(data);
     editor->applyFilter(std::make_unique<GrayscaleFilter>());
 }
 
-// Обработчик для применения фильтра размытия
 void applyBlurCallback(Fl_Widget*, void* data) {
     ImageEditor* editor = static_cast<ImageEditor*>(data);
     editor->applyFilter(std::make_unique<BlurFilter>());
 }
 
-// Обработчик для применения фильтра увеличения резкости
 void applySharpenCallback(Fl_Widget*, void* data) {
     ImageEditor* editor = static_cast<ImageEditor*>(data);
     editor->applyFilter(std::make_unique<SharpenFilter>());
 }
 
 int main() {
+    cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_SILENT);
     Fl_Window* window = new Fl_Window(800, 600, "Image Editor");
 
     Fl_Box* imageBox = new Fl_Box(10, 10, 780, 480);
