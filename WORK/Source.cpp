@@ -8,6 +8,41 @@
 #include <memory>
 #include <string>
 #include <iostream>
+#include <stack>
+
+// Функция для открытия файла через диалоговое окно
+std::wstring openFileDialog(const wchar_t* filter) {
+    wchar_t fileName[MAX_PATH] = { 0 };
+    OPENFILENAME ofn = { 0 };
+    ofn.lStructSize = sizeof(OPENFILENAME);
+    ofn.hwndOwner = NULL;
+    ofn.lpstrFilter = filter;
+    ofn.lpstrFile = fileName;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
+
+    if (GetOpenFileName(&ofn)) {
+        return fileName;
+    }
+    return L"";
+}
+
+// Функция для сохранения файла через диалоговое окно
+std::wstring saveFileDialog(const wchar_t* filter) {
+    wchar_t fileName[MAX_PATH] = L"output.jpg";
+    OPENFILENAME ofn = { 0 };
+    ofn.lStructSize = sizeof(OPENFILENAME);
+    ofn.hwndOwner = NULL;
+    ofn.lpstrFilter = filter;
+    ofn.lpstrFile = fileName;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_OVERWRITEPROMPT;
+
+    if (GetSaveFileName(&ofn)) {
+        return fileName;
+    }
+    return L"";
+}
 
 // Абстрактный базовый класс для фильтров
 class Filter {
@@ -57,6 +92,7 @@ public:
 class ImageEditor {
 private:
     cv::Mat image;
+    std::stack<cv::Mat> history; // Стек для хранения истории изменений
     double brightness = 1.0; // Начальная яркость
     double saturation = 1.0; // Начальная насыщенность
 
@@ -98,6 +134,7 @@ public:
             MessageBox(NULL, L"Failed to load image", L"Error", MB_OK | MB_ICONERROR);
         }
         else {
+            saveState(); // Сохраняем состояние при открытии изображения
             updateImageDisplay();
         }
     }
@@ -116,6 +153,7 @@ public:
     void applyFilter(std::unique_ptr<Filter> filter) {
         if (!image.empty() && filter) {
             try {
+                saveState(); // Сохраняем состояние перед применением фильтра
                 filter->apply(image);
                 updateImageDisplay();
             }
@@ -130,18 +168,38 @@ public:
 
     // Изменение яркости
     void setBrightness(double value) {
+        saveState(); // Сохраняем состояние перед изменением яркости
         brightness = value;
         updateImageDisplay();
     }
 
     // Изменение насыщенности
     void setSaturation(double value) {
+        saveState(); // Сохраняем состояние перед изменением насыщенности
         saturation = value;
         updateImageDisplay();
     }
+
+    // Отмена последнего действия
+    void undo() {
+        if (!history.empty()) {
+            image = history.top(); // Извлекаем последнее состояние
+            history.pop(); // Убираем его из стека
+            updateImageDisplay();
+        }
+        else {
+            MessageBox(NULL, L"No action to undo", L"Error", MB_OK | MB_ICONERROR);
+        }
+    }
+
+private:
+    // Сохранение текущего состояния изображения в стек
+    void saveState() {
+        history.push(image.clone()); // Сохраняем копию текущего состояния
+    }
 };
 
-// Класс для ползунка яркости
+// Классы для ползунков яркости и насыщенности
 class BrightnessSlider : public Fl_Slider {
 private:
     ImageEditor* editor;
@@ -161,7 +219,6 @@ public:
     }
 };
 
-// Класс для ползунка насыщенности
 class SaturationSlider : public Fl_Slider {
 private:
     ImageEditor* editor;
@@ -181,38 +238,10 @@ public:
     }
 };
 
-// Открытие файла через диалог
-std::wstring openFileDialog(const wchar_t* filter) {
-    wchar_t fileName[MAX_PATH] = { 0 };
-    OPENFILENAME ofn = { 0 };
-    ofn.lStructSize = sizeof(OPENFILENAME);
-    ofn.hwndOwner = NULL;
-    ofn.lpstrFilter = filter;
-    ofn.lpstrFile = fileName;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
-
-    if (GetOpenFileName(&ofn)) {
-        return fileName;
-    }
-    return L"";
-}
-
-// Сохранение файла через диалог
-std::wstring saveFileDialog(const wchar_t* filter) {
-    wchar_t fileName[MAX_PATH] = L"output.jpg";
-    OPENFILENAME ofn = { 0 };
-    ofn.lStructSize = sizeof(OPENFILENAME);
-    ofn.hwndOwner = NULL;
-    ofn.lpstrFilter = filter;
-    ofn.lpstrFile = fileName;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_OVERWRITEPROMPT;
-
-    if (GetSaveFileName(&ofn)) {
-        return fileName;
-    }
-    return L"";
+// Колбэк для кнопки Undo
+void undoCallback(Fl_Widget*, void* data) {
+    ImageEditor* editor = static_cast<ImageEditor*>(data);
+    editor->undo();
 }
 
 // Колбэки для FLTK кнопок
@@ -254,7 +283,7 @@ void applyInvertCallback(Fl_Widget*, void* data) {
 
 int main() {
     // Окно для панели с кнопками
-    Fl_Window* buttonWindow = new Fl_Window(800, 300, "Button Panel");
+    Fl_Window* buttonWindow = new Fl_Window(800, 350, "Image Editor");
 
     ImageEditor editor; // Создаем объект для работы с изображениями
 
@@ -264,22 +293,25 @@ int main() {
     Fl_Button* saveButton = new Fl_Button(140, 10, 120, 30, "Save");
     saveButton->callback(saveImageCallback, &editor);
 
-    Fl_Button* grayscaleButton = new Fl_Button(270, 10, 120, 30, "Grayscale");
+    Fl_Button* undoButton = new Fl_Button(270, 10, 120, 30, "Undo");
+    undoButton->callback(undoCallback, &editor);
+
+    // Кнопки для применения фильтров
+    Fl_Button* grayscaleButton = new Fl_Button(10, 50, 120, 30, "Grayscale");
     grayscaleButton->callback(applyGrayscaleCallback, &editor);
 
-    Fl_Button* blurButton = new Fl_Button(400, 10, 120, 30, "Blur");
+    Fl_Button* blurButton = new Fl_Button(140, 50, 120, 30, "Blur");
     blurButton->callback(applyBlurCallback, &editor);
 
-    Fl_Button* sharpenButton = new Fl_Button(530, 10, 120, 30, "Sharpen");
+    Fl_Button* sharpenButton = new Fl_Button(270, 50, 120, 30, "Sharpen");
     sharpenButton->callback(applySharpenCallback, &editor);
 
-    // Кнопка для инверсии цвета
-    Fl_Button* invertButton = new Fl_Button(660, 10, 120, 30, "Invert Colors");
+    Fl_Button* invertButton = new Fl_Button(400, 50, 120, 30, "Invert Colors");
     invertButton->callback(applyInvertCallback, &editor);
 
     // Ползунки для изменения яркости и насыщенности
-    BrightnessSlider* brightnessSlider = new BrightnessSlider(10, 50, 760, 20, "Brightness", &editor);
-    SaturationSlider* saturationSlider = new SaturationSlider(10, 90, 760, 20, "Saturation", &editor);
+    BrightnessSlider* brightnessSlider = new BrightnessSlider(10, 90, 760, 20, "Brightness", &editor);
+    SaturationSlider* saturationSlider = new SaturationSlider(10, 130, 760, 20, "Saturation", &editor);
 
     buttonWindow->end();
     buttonWindow->show();
