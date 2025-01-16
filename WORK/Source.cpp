@@ -88,6 +88,14 @@ public:
     }
 };
 
+// Фильтр зеркального отражения
+class MirrorFilter : public Filter {
+public:
+    void apply(cv::Mat& image) override {
+        cv::flip(image, image, 1); // Отражение по горизонтали
+    }
+};
+
 // Класс для работы с изображениями
 class ImageEditor {
 private:
@@ -95,12 +103,14 @@ private:
     std::stack<cv::Mat> history; // Стек для хранения истории изменений
     double brightness = 1.0; // Начальная яркость
     double saturation = 1.0; // Начальная насыщенность
+    double scaleFactor = 1.0; // Коэффициент масштабирования
 
     // Функция обновления изображения
     void updateImageDisplay() {
         if (!image.empty() && image.channels() == 3) {
             cv::Mat temp = image.clone();
             applyBrightnessAndSaturation(temp);
+            cv::resize(temp, temp, cv::Size(), scaleFactor, scaleFactor); // Масштабируем изображение
             cv::imshow("Image", temp); // Отображаем изображение через OpenCV
             cv::waitKey(1);  // Обновляем окно
         }
@@ -180,6 +190,13 @@ public:
         updateImageDisplay();
     }
 
+    // Изменение масштаба
+    void setScale(double value) {
+        saveState(); // Сохраняем состояние перед изменением масштаба
+        scaleFactor = value;
+        updateImageDisplay(); // Обновляем отображение с учетом нового масштаба
+    }
+
     // Отмена последнего действия
     void undo() {
         if (!history.empty()) {
@@ -208,8 +225,8 @@ public:
     BrightnessSlider(int x, int y, int w, int h, const char* label, ImageEditor* editor)
         : Fl_Slider(x, y, w, h, label), editor(editor) {
         type(FL_HORIZONTAL);
-        range(0, 2);
-        value(1);
+        range(0.0, 2.0); // Диапазон яркости от 0.0 до 2.0
+        value(1.0); // Начальная яркость
         callback(sliderCallback, this);
     }
 
@@ -227,8 +244,8 @@ public:
     SaturationSlider(int x, int y, int w, int h, const char* label, ImageEditor* editor)
         : Fl_Slider(x, y, w, h, label), editor(editor) {
         type(FL_HORIZONTAL);
-        range(0, 2);
-        value(1);
+        range(0.0, 2.0); // Диапазон насыщенности от 0.0 до 2.0
+        value(1.0); // Начальная насыщенность
         callback(sliderCallback, this);
     }
 
@@ -238,13 +255,33 @@ public:
     }
 };
 
+// Новый класс для ползунка масштабирования
+class ScaleSlider : public Fl_Slider {
+private:
+    ImageEditor* editor;
+
+public:
+    ScaleSlider(int x, int y, int w, int h, const char* label, ImageEditor* editor)
+        : Fl_Slider(x, y, w, h, label), editor(editor) {
+        type(FL_HORIZONTAL);
+        range(0.1, 2.0); // Диапазон масштабирования от 0.1 до 2.0
+        value(1.0); // Начальный коэффициент масштаба
+        callback(sliderCallback, this);
+    }
+
+    static void sliderCallback(Fl_Widget* widget, void* data) {
+        ScaleSlider* slider = static_cast<ScaleSlider*>(widget);
+        slider->editor->setScale(slider->value());
+    }
+};
+
 // Колбэк для кнопки Undo
 void undoCallback(Fl_Widget*, void* data) {
     ImageEditor* editor = static_cast<ImageEditor*>(data);
     editor->undo();
 }
 
-// Колбэки для FLTK кнопок
+// Колбэки для кнопок
 void openImageCallback(Fl_Widget*, void* data) {
     ImageEditor* editor = static_cast<ImageEditor*>(data);
     std::wstring path = openFileDialog(L"Images (*.jpg;*.png)\0*.jpg;*.png\0");
@@ -281,9 +318,14 @@ void applyInvertCallback(Fl_Widget*, void* data) {
     editor->applyFilter(std::make_unique<InvertFilter>());
 }
 
+void applyMirrorCallback(Fl_Widget*, void* data) {
+    ImageEditor* editor = static_cast<ImageEditor*>(data);
+    editor->applyFilter(std::make_unique<MirrorFilter>());
+}
+
 int main() {
     // Окно для панели с кнопками
-    Fl_Window* buttonWindow = new Fl_Window(800, 350, "Image Editor");
+    Fl_Window* buttonWindow = new Fl_Window(800, 400, "Image Editor");
 
     ImageEditor editor; // Создаем объект для работы с изображениями
 
@@ -309,9 +351,16 @@ int main() {
     Fl_Button* invertButton = new Fl_Button(400, 50, 120, 30, "Invert Colors");
     invertButton->callback(applyInvertCallback, &editor);
 
+    // Новая кнопка для зеркального отражения
+    Fl_Button* mirrorButton = new Fl_Button(530, 50, 120, 30, "Mirror");
+    mirrorButton->callback(applyMirrorCallback, &editor);
+
     // Ползунки для изменения яркости и насыщенности
     BrightnessSlider* brightnessSlider = new BrightnessSlider(10, 90, 760, 20, "Brightness", &editor);
     SaturationSlider* saturationSlider = new SaturationSlider(10, 130, 760, 20, "Saturation", &editor);
+
+    // Новый ползунок для масштабирования
+    ScaleSlider* scaleSlider = new ScaleSlider(10, 170, 760, 20, "Scale", &editor);
 
     buttonWindow->end();
     buttonWindow->show();
