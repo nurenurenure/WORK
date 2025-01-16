@@ -1,4 +1,4 @@
-#include <opencv2/opencv.hpp>
+#include <opencv2/opencv.hpp> 
 #include <FL/Fl.H>
 #include <FL/Fl_Window.H>
 #include <FL/Fl_Button.H>
@@ -104,12 +104,14 @@ private:
     double brightness = 1.0; // Начальная яркость
     double saturation = 1.0; // Начальная насыщенность
     double scaleFactor = 1.0; // Коэффициент масштабирования
+    int r = 0, g = 0, b = 0; // Значения RGB для отдельного управления каналами
 
     // Функция обновления изображения
     void updateImageDisplay() {
         if (!image.empty() && image.channels() == 3) {
             cv::Mat temp = image.clone();
             applyBrightnessAndSaturation(temp);
+            applyRGBChannels(temp);
             cv::resize(temp, temp, cv::Size(), scaleFactor, scaleFactor); // Масштабируем изображение
             cv::imshow("Image", temp); // Отображаем изображение через OpenCV
             cv::waitKey(1);  // Обновляем окно
@@ -121,19 +123,29 @@ private:
 
     // Применение яркости и насыщенности
     void applyBrightnessAndSaturation(cv::Mat& img) {
-        // Применяем изменение яркости
         img.convertTo(img, -1, brightness, 0);
 
-        // Преобразуем в цветовое пространство HSV для изменения насыщенности
         cv::Mat hsvImage;
         cv::cvtColor(img, hsvImage, cv::COLOR_BGR2HSV);
         for (int y = 0; y < hsvImage.rows; y++) {
             for (int x = 0; x < hsvImage.cols; x++) {
                 cv::Vec3b& pixel = hsvImage.at<cv::Vec3b>(y, x);
-                pixel[1] = cv::saturate_cast<uchar>(pixel[1] * saturation); // Изменение насыщенности
+                pixel[1] = cv::saturate_cast<uchar>(pixel[1] * saturation);
             }
         }
-        cv::cvtColor(hsvImage, img, cv::COLOR_HSV2BGR); // Преобразуем обратно в BGR
+        cv::cvtColor(hsvImage, img, cv::COLOR_HSV2BGR);
+    }
+
+    // Применение изменений в отдельных каналах RGB
+    void applyRGBChannels(cv::Mat& img) {
+        if (r != 0 || g != 0 || b != 0) {
+            cv::Mat channels[3];
+            cv::split(img, channels);
+            channels[0] += r; // R-канал
+            channels[1] += g; // G-канал
+            channels[2] += b; // B-канал
+            cv::merge(channels, 3, img);
+        }
     }
 
 public:
@@ -209,6 +221,15 @@ public:
         }
     }
 
+    // Установить значения для RGB каналов
+    void setRGB(int red, int green, int blue) {
+        saveState();
+        r = red;
+        g = green;
+        b = blue;
+        updateImageDisplay();
+    }
+
 private:
     // Сохранение текущего состояния изображения в стек
     void saveState() {
@@ -272,6 +293,47 @@ public:
     static void sliderCallback(Fl_Widget* widget, void* data) {
         ScaleSlider* slider = static_cast<ScaleSlider*>(widget);
         slider->editor->setScale(slider->value());
+    }
+};
+
+// Новый класс для ползунков RGB каналов
+class RGBSlider : public Fl_Window {
+private:
+    ImageEditor* editor;
+    Fl_Slider* rSlider;
+    Fl_Slider* gSlider;
+    Fl_Slider* bSlider;
+
+public:
+    RGBSlider(int x, int y, int w, int h, ImageEditor* editor)
+        : Fl_Window(x, y, w, h), editor(editor) {
+        rSlider = new Fl_Slider(10, 10, w - 20, 20, "Red");
+        rSlider->type(FL_HORIZONTAL);
+        rSlider->range(-100, 100);
+        rSlider->value(0);
+        rSlider->callback(sliderCallback, this);
+
+        gSlider = new Fl_Slider(10, 40, w - 20, 20, "Green");
+        gSlider->type(FL_HORIZONTAL);
+        gSlider->range(-100, 100);
+        gSlider->value(0);
+        gSlider->callback(sliderCallback, this);
+
+        bSlider = new Fl_Slider(10, 70, w - 20, 20, "Blue");
+        bSlider->type(FL_HORIZONTAL);
+        bSlider->range(-100, 100);
+        bSlider->value(0);
+        bSlider->callback(sliderCallback, this);
+
+        end();
+    }
+
+    static void sliderCallback(Fl_Widget* widget, void* data) {
+        RGBSlider* rgbSlider = static_cast<RGBSlider*>(data);
+        int r = rgbSlider->rSlider->value();
+        int g = rgbSlider->gSlider->value();
+        int b = rgbSlider->bSlider->value();
+        rgbSlider->editor->setRGB(r, g, b);
     }
 };
 
@@ -362,8 +424,15 @@ int main() {
     // Новый ползунок для масштабирования
     ScaleSlider* scaleSlider = new ScaleSlider(10, 170, 760, 20, "Scale", &editor);
 
+    // Кнопка для открытия окна RGB
+    Fl_Button* rgbButton = new Fl_Button(10, 210, 120, 30, "Adjust RGB");
+    rgbButton->callback([](Fl_Widget*, void* data) {
+        RGBSlider* rgbWindow = new RGBSlider(200, 200, 300, 150, static_cast<ImageEditor*>(data));
+        rgbWindow->show();
+        }, &editor);
+
     buttonWindow->end();
     buttonWindow->show();
 
-    return Fl::run(); // Запуск FLTK
+    return Fl::run();
 }
