@@ -1,4 +1,4 @@
-#include <opencv2/opencv.hpp> 
+#include <opencv2/opencv.hpp>
 #include <FL/Fl.H>
 #include <FL/Fl_Window.H>
 #include <FL/Fl_Button.H>
@@ -9,6 +9,8 @@
 #include <string>
 #include <iostream>
 #include <stack>
+
+
 
 // Функция для открытия файла через диалоговое окно
 std::wstring openFileDialog(const wchar_t* filter) {
@@ -105,6 +107,8 @@ private:
     double saturation = 1.0; // Начальная насыщенность
     double scaleFactor = 1.0; // Коэффициент масштабирования
     int r = 0, g = 0, b = 0; // Значения RGB для отдельного управления каналами
+    cv::Mat overlayImage; // Для хранения наложенного изображения
+    double transparency = 1.0; // Прозрачность наложенного изображения
 
     // Функция обновления изображения
     void updateImageDisplay() {
@@ -112,6 +116,13 @@ private:
             cv::Mat temp = image.clone();
             applyBrightnessAndSaturation(temp);
             applyRGBChannels(temp);
+
+            if (!overlayImage.empty()) {
+                cv::Mat overlayResized;
+                cv::resize(overlayImage, overlayResized, temp.size());
+                cv::addWeighted(temp, 1.0, overlayResized, transparency, 0, temp); // Наложение изображения с прозрачностью
+            }
+
             cv::resize(temp, temp, cv::Size(), scaleFactor, scaleFactor); // Масштабируем изображение
             cv::imshow("Image", temp); // Отображаем изображение через OpenCV
             cv::waitKey(1);  // Обновляем окно
@@ -120,6 +131,7 @@ private:
             MessageBox(NULL, L"Invalid image format", L"Error", MB_OK | MB_ICONERROR);
         }
     }
+
 
     // Применение яркости и насыщенности
     void applyBrightnessAndSaturation(cv::Mat& img) {
@@ -149,6 +161,9 @@ private:
     }
 
 public:
+    int getRed() const { return r; }
+    int getGreen() const { return g; }
+    int getBlue() const { return b; }
     // Открытие изображения
     void openImage(const std::wstring& path) {
         image = cv::imread(cv::String(path.begin(), path.end()), cv::IMREAD_COLOR);
@@ -230,6 +245,19 @@ public:
         updateImageDisplay();
     }
 
+    // Добавление изображения поверх
+    void addOverlayImage(const std::wstring& path, double alpha) {
+        cv::Mat overlay = cv::imread(cv::String(path.begin(), path.end()), cv::IMREAD_COLOR);
+        if (!overlay.empty()) {
+            overlayImage = overlay;
+            transparency = alpha;
+            updateImageDisplay();
+        }
+        else {
+            MessageBox(NULL, L"Failed to load overlay image", L"Error", MB_OK | MB_ICONERROR);
+        }
+    }
+
 private:
     // Сохранение текущего состояния изображения в стек
     void saveState() {
@@ -237,105 +265,37 @@ private:
     }
 };
 
-// Классы для ползунков яркости и насыщенности
-class BrightnessSlider : public Fl_Slider {
-private:
-    ImageEditor* editor;
 
+// Класс для извлечения палитры изображения
+class Palette {
 public:
-    BrightnessSlider(int x, int y, int w, int h, const char* label, ImageEditor* editor)
-        : Fl_Slider(x, y, w, h, label), editor(editor) {
-        type(FL_HORIZONTAL);
-        range(0.0, 2.0); // Диапазон яркости от 0.0 до 2.0
-        value(1.0); // Начальная яркость
-        callback(sliderCallback, this);
-    }
+    static std::vector<cv::Vec3b> extractPalette(const cv::Mat& image, int numColors) {
+        if (image.empty() || image.channels() != 3) {
+            throw std::runtime_error("Invalid image for palette extraction");
+        }
 
-    static void sliderCallback(Fl_Widget* widget, void* data) {
-        BrightnessSlider* slider = static_cast<BrightnessSlider*>(widget);
-        slider->editor->setBrightness(slider->value());
+        cv::Mat data;
+        image.convertTo(data, CV_32F); // Преобразуем изображение в формат с плавающей точкой
+        data = data.reshape(1, image.rows * image.cols); // Перекладываем пиксели в один столбец
+
+        // Используем алгоритм кластеризации k-means
+        cv::Mat labels, centers;
+        cv::kmeans(data, numColors, labels,
+            cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::MAX_ITER, 10, 1.0),
+            3, cv::KMEANS_PP_CENTERS, centers);
+
+        centers.convertTo(centers, CV_8UC1); // Преобразуем центры обратно в целочисленный формат
+        centers = centers.reshape(3); // Преобразуем обратно в трехканальный формат
+
+        // Преобразуем центры кластеров в вектор цветов
+        std::vector<cv::Vec3b> palette;
+        for (int i = 0; i < centers.rows; ++i) {
+            palette.push_back(centers.at<cv::Vec3b>(i, 0));
+        }
+        return palette;
     }
 };
 
-class SaturationSlider : public Fl_Slider {
-private:
-    ImageEditor* editor;
-
-public:
-    SaturationSlider(int x, int y, int w, int h, const char* label, ImageEditor* editor)
-        : Fl_Slider(x, y, w, h, label), editor(editor) {
-        type(FL_HORIZONTAL);
-        range(0.0, 2.0); // Диапазон насыщенности от 0.0 до 2.0
-        value(1.0); // Начальная насыщенность
-        callback(sliderCallback, this);
-    }
-
-    static void sliderCallback(Fl_Widget* widget, void* data) {
-        SaturationSlider* slider = static_cast<SaturationSlider*>(widget);
-        slider->editor->setSaturation(slider->value());
-    }
-};
-
-// Новый класс для ползунка масштабирования
-class ScaleSlider : public Fl_Slider {
-private:
-    ImageEditor* editor;
-
-public:
-    ScaleSlider(int x, int y, int w, int h, const char* label, ImageEditor* editor)
-        : Fl_Slider(x, y, w, h, label), editor(editor) {
-        type(FL_HORIZONTAL);
-        range(0.1, 2.0); // Диапазон масштабирования от 0.1 до 2.0
-        value(1.0); // Начальный коэффициент масштаба
-        callback(sliderCallback, this);
-    }
-
-    static void sliderCallback(Fl_Widget* widget, void* data) {
-        ScaleSlider* slider = static_cast<ScaleSlider*>(widget);
-        slider->editor->setScale(slider->value());
-    }
-};
-
-// Новый класс для ползунков RGB каналов
-class RGBSlider : public Fl_Window {
-private:
-    ImageEditor* editor;
-    Fl_Slider* rSlider;
-    Fl_Slider* gSlider;
-    Fl_Slider* bSlider;
-
-public:
-    RGBSlider(int x, int y, int w, int h, ImageEditor* editor)
-        : Fl_Window(x, y, w, h), editor(editor) {
-        rSlider = new Fl_Slider(10, 10, w - 20, 20, "Red");
-        rSlider->type(FL_HORIZONTAL);
-        rSlider->range(-100, 100);
-        rSlider->value(0);
-        rSlider->callback(sliderCallback, this);
-
-        gSlider = new Fl_Slider(10, 40, w - 20, 20, "Green");
-        gSlider->type(FL_HORIZONTAL);
-        gSlider->range(-100, 100);
-        gSlider->value(0);
-        gSlider->callback(sliderCallback, this);
-
-        bSlider = new Fl_Slider(10, 70, w - 20, 20, "Blue");
-        bSlider->type(FL_HORIZONTAL);
-        bSlider->range(-100, 100);
-        bSlider->value(0);
-        bSlider->callback(sliderCallback, this);
-
-        end();
-    }
-
-    static void sliderCallback(Fl_Widget* widget, void* data) {
-        RGBSlider* rgbSlider = static_cast<RGBSlider*>(data);
-        int r = rgbSlider->rSlider->value();
-        int g = rgbSlider->gSlider->value();
-        int b = rgbSlider->bSlider->value();
-        rgbSlider->editor->setRGB(r, g, b);
-    }
-};
 
 // Колбэк для кнопки Undo
 void undoCallback(Fl_Widget*, void* data) {
@@ -385,6 +345,12 @@ void applyMirrorCallback(Fl_Widget*, void* data) {
     editor->applyFilter(std::make_unique<MirrorFilter>());
 }
 
+
+
+
+
+
+
 int main() {
     // Окно для панели с кнопками
     Fl_Window* buttonWindow = new Fl_Window(800, 400, "Image Editor");
@@ -417,22 +383,88 @@ int main() {
     Fl_Button* mirrorButton = new Fl_Button(530, 50, 120, 30, "Mirror");
     mirrorButton->callback(applyMirrorCallback, &editor);
 
-    // Ползунки для изменения яркости и насыщенности
-    BrightnessSlider* brightnessSlider = new BrightnessSlider(10, 90, 760, 20, "Brightness", &editor);
-    SaturationSlider* saturationSlider = new SaturationSlider(10, 130, 760, 20, "Saturation", &editor);
-
-    // Новый ползунок для масштабирования
-    ScaleSlider* scaleSlider = new ScaleSlider(10, 170, 760, 20, "Scale", &editor);
-
-    // Кнопка для открытия окна RGB
-    Fl_Button* rgbButton = new Fl_Button(10, 210, 120, 30, "Adjust RGB");
-    rgbButton->callback([](Fl_Widget*, void* data) {
-        RGBSlider* rgbWindow = new RGBSlider(200, 200, 300, 150, static_cast<ImageEditor*>(data));
-        rgbWindow->show();
+    // Кнопка для добавления наложенного изображения
+    Fl_Button* overlayButton = new Fl_Button(660, 50, 120, 30, "Overlay Image");
+    overlayButton->callback([](Fl_Widget*, void* data) {
+        ImageEditor* editor = static_cast<ImageEditor*>(data);
+        std::wstring path = openFileDialog(L"Images (*.jpg;*.png)\0*.jpg;*.png\0");
+        if (!path.empty()) {
+            double alpha = 0.5; // Пример прозрачности
+            editor->addOverlayImage(path, alpha);
+        }
         }, &editor);
 
+    // Ползунки для изменения яркости и насыщенности
+    Fl_Slider* brightnessSlider = new Fl_Slider(10, 90, 760, 20, "Brightness");
+    brightnessSlider->type(FL_HORIZONTAL);
+    brightnessSlider->minimum(0.0);
+    brightnessSlider->maximum(2.0);
+    brightnessSlider->value(1.0);
+    brightnessSlider->callback([](Fl_Widget* widget, void* data) {
+        ImageEditor* editor = static_cast<ImageEditor*>(data);
+        editor->setBrightness(static_cast<Fl_Slider*>(widget)->value());
+        }, &editor);
+
+    Fl_Slider* saturationSlider = new Fl_Slider(10, 130, 760, 20, "Saturation");
+    saturationSlider->type(FL_HORIZONTAL);
+    saturationSlider->minimum(0.0);
+    saturationSlider->maximum(2.0);
+    saturationSlider->value(1.0);
+    saturationSlider->callback([](Fl_Widget* widget, void* data) {
+        ImageEditor* editor = static_cast<ImageEditor*>(data);
+        editor->setSaturation(static_cast<Fl_Slider*>(widget)->value());
+        }, &editor);
+
+    // Новый ползунок для масштабирования
+    Fl_Slider* scaleSlider = new Fl_Slider(10, 170, 760, 20, "Scale");
+    scaleSlider->type(FL_HORIZONTAL);
+    scaleSlider->minimum(0.1);
+    scaleSlider->maximum(3.0);
+    scaleSlider->value(1.0);
+    scaleSlider->callback([](Fl_Widget* widget, void* data) {
+        ImageEditor* editor = static_cast<ImageEditor*>(data);
+        editor->setScale(static_cast<Fl_Slider*>(widget)->value());
+        }, &editor);
+    // Ползунки для редактирования каналов RGB
+    Fl_Slider* redSlider = new Fl_Slider(10, 210, 760, 20, "Red Channel");
+    redSlider->type(FL_HORIZONTAL);
+    redSlider->minimum(-255);
+    redSlider->maximum(255);
+    redSlider->value(0);
+    redSlider->callback([](Fl_Widget* widget, void* data) {
+        ImageEditor* editor = static_cast<ImageEditor*>(data);
+        int red = static_cast<Fl_Slider*>(widget)->value();
+        int green = editor->getGreen(); // Получаем текущие значения для других каналов
+        int blue = editor->getBlue(); // Получаем текущие значения для синего канала
+        editor->setRGB(red, green, blue); // Устанавливаем новые значения
+        }, &editor);
+
+    Fl_Slider* greenSlider = new Fl_Slider(10, 250, 760, 20, "Green Channel");
+    greenSlider->type(FL_HORIZONTAL);
+    greenSlider->minimum(-255);
+    greenSlider->maximum(255);
+    greenSlider->value(0);
+    greenSlider->callback([](Fl_Widget* widget, void* data) {
+        ImageEditor* editor = static_cast<ImageEditor*>(data);
+        int red = editor->getRed(); // Получаем текущие значения для красного канала
+        int green = static_cast<Fl_Slider*>(widget)->value();
+        int blue = editor->getBlue(); // Получаем текущие значения для синего канала
+        editor->setRGB(red, green, blue); // Устанавливаем новые значения
+        }, &editor);
+
+    Fl_Slider* blueSlider = new Fl_Slider(10, 290, 760, 20, "Blue Channel");
+    blueSlider->type(FL_HORIZONTAL);
+    blueSlider->minimum(-255);
+    blueSlider->maximum(255);
+    blueSlider->value(0);
+    blueSlider->callback([](Fl_Widget* widget, void* data) {
+        ImageEditor* editor = static_cast<ImageEditor*>(data);
+        int red = editor->getRed(); // Получаем текущие значения для красного канала
+        int green = editor->getGreen(); // Получаем текущие значения для зеленого канала
+        int blue = static_cast<Fl_Slider*>(widget)->value();
+        editor->setRGB(red, green, blue); // Устанавливаем новые значения
+        }, &editor);
     buttonWindow->end();
     buttonWindow->show();
-
     return Fl::run();
 }
