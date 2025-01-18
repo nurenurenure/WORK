@@ -495,7 +495,8 @@ int main() {
         int blue = static_cast<Fl_Slider*>(widget)->value();
         editor->setRGB(red, green, blue); // Устанавливаем новые значения
         }, &editor);
-
+    Fl_Button* paletteButton = new Fl_Button(10, 330, 120, 30, "Extract Palette");
+    paletteButton->callback(extractPaletteCallback, &editor);
     buttonWindow->end();
     buttonWindow->show();
     return Fl::run();
