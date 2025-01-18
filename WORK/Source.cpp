@@ -161,6 +161,9 @@ private:
     }
 
 public:
+    cv::Mat getCurrentImage() const {
+        return image.clone();
+    }
     int getRed() const { return r; }
     int getGreen() const { return g; }
     int getBlue() const { return b; }
@@ -295,6 +298,34 @@ public:
         return palette;
     }
 };
+
+// Добавление функции для отображения палитры
+void displayPalette(const std::vector<cv::Vec3b>& palette) {
+    const int swatchSize = 50;
+    cv::Mat paletteImage(swatchSize, palette.size() * swatchSize, CV_8UC3);
+
+    for (size_t i = 0; i < palette.size(); ++i) {
+        cv::Rect rect(i * swatchSize, 0, swatchSize, swatchSize);
+        cv::rectangle(paletteImage, rect, cv::Scalar(palette[i][0], palette[i][1], palette[i][2]), -1);
+    }
+
+    cv::imshow("Palette", paletteImage);
+    cv::waitKey(1);
+}
+
+// Колбэк для извлечения и отображения палитры
+void extractPaletteCallback(Fl_Widget*, void* data) {
+    ImageEditor* editor = static_cast<ImageEditor*>(data);
+
+    try {
+        const int numColors = 5; // Количество цветов в палитре
+        auto palette = Palette::extractPalette(editor->getCurrentImage(), numColors);
+        displayPalette(palette);
+    }
+    catch (const std::exception& e) {
+        MessageBox(NULL, std::wstring(L"Error extracting palette: " + std::wstring(e.what(), e.what() + strlen(e.what()))).c_str(), L"Error", MB_OK | MB_ICONERROR);
+    }
+}
 
 
 // Колбэк для кнопки Undo
@@ -464,6 +495,7 @@ int main() {
         int blue = static_cast<Fl_Slider*>(widget)->value();
         editor->setRGB(red, green, blue); // Устанавливаем новые значения
         }, &editor);
+
     buttonWindow->end();
     buttonWindow->show();
     return Fl::run();
